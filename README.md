@@ -100,8 +100,8 @@ DB Endpoint – internal MySQL address
 #### Khalid Suliman
 MEng Electronic & Software Engineering – University of Aberdeen
 
-Notes
+## Notes
 
-All sensitive details (IPs, ARNs, account IDs) are blurred in screenshots.
+- All sensitive details (IPs, ARNs, account IDs) are blurred in screenshots.
 
-Templates and configs are for educational/demo purposes, not production.
+- Templates and configs are for educational/demo purposes, not production.
