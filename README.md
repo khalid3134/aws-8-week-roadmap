@@ -1,4 +1,3 @@
-# AWS-8-week-roadmap
 # AWS 8-Week Roadmap – Final Project
 
 This repository documents my journey through an **8-week AWS Cloud Engineering Roadmap**.  
@@ -12,25 +11,22 @@ The final project demonstrates a production-style architecture with **VPC, Basti
 
 aws-8-week-roadmap/
 │
-├── final-project-template.yaml # Final production CloudFormation template
+├── final-project-template.yaml      # Final production CloudFormation template
 │
-├── other_templates/ # Earlier Week 7–8 templates
-│ ├── week7-day1.yaml
-│ ├── week7-day2.yaml
-│ ├── week7-day3.yaml
-│ ├── week7-day4.yaml
-│ ├── week7-day5.yaml
-│ └── week8-day2.yaml
+├── other_templates/                 # Earlier Week 7–8 templates
+│   ├── week7-day1.yaml
+│   ├── week7-day2.yaml
+│   ├── week7-day3.yaml
+│   ├── week7-day4.yaml
+│   ├── week7-day5.yaml
+│   └── week8-day2.yaml
 │
-├── screenshots/ # Blurred AWS Console + CLI screenshots
+├── screenshots/                     # Blurred AWS Console + CLI screenshots
 │
-├── 8-Week AWS Roadmap Overview.pdf # First book: Roadmap documentation
-├── Cloud-Engineer-Playbook.pdf # Second book: Broader handbook (to be added soon)
+├── 8-Week AWS Roadmap Overview.pdf  # First book: Roadmap documentation
+├── Cloud-Engineer-Playbook.pdf      # Second book: Broader handbook (to be added soon)
 │
 └── README.md
-
-yaml
-Copy code
 
 ---
 
@@ -99,10 +95,12 @@ Bastion IP – SSH access
 DB Endpoint – internal MySQL address
 
 Author
+
 Khalid Suliman
 MEng Electronic & Software Engineering – University of Aberdeen
 
 Notes
+
 All sensitive details (IPs, ARNs, account IDs) are blurred in screenshots.
 
 Templates and configs are for educational/demo purposes, not production.
