@@ -5,6 +5,27 @@ It includes Infrastructure-as-Code (CloudFormation templates), test evidence (sc
 
 The final project demonstrates a production-style architecture with **VPC, Bastion Host, Application Load Balancer (ALB), Auto Scaling Group (ASG), RDS MySQL Database, and CloudWatch Monitoring**.
 
+---
+
+## Repository Structure
+
+```
+aws-8-week-roadmap/
+├── final-project-template.yaml      # Final production CloudFormation template
+├── other_templates/                 # Earlier Week 7–8 templates
+│   ├── week7-day1.yaml
+│   ├── week7-day2.yaml
+│   ├── week7-day3.yaml
+│   ├── week7-day4.yaml
+│   ├── week7-day5.yaml
+│   └── week8-day2.yaml
+├── screenshots/                     # Blurred AWS Console + CLI screenshots
+├── 8-Week AWS Roadmap Overview.pdf  # First book: Roadmap documentation
+├── Cloud-Engineer-Playbook.pdf      # Second book: Broader handbook (to be added soon)
+└── README.md
+```
+
+---
 
 
 ## Final Architecture Features
