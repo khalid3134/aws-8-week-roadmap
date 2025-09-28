@@ -20,8 +20,6 @@ aws-8-week-roadmap/
 │   ├── week7-day5.yaml
 │   └── week8-day2.yaml
 ├── screenshots/                     # Blurred AWS Console + CLI screenshots
-├── 8-Week AWS Roadmap Overview.pdf  # First book: Roadmap documentation
-├── Cloud-Engineer-Playbook.pdf      # Second book: Broader handbook (to be added soon)
 └── README.md
 ```
 
