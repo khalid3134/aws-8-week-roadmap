@@ -86,6 +86,7 @@ aws cloudformation create-stack \
   --stack-name test-stack \
   --template-body file://final-project-template.yaml \
   --capabilities CAPABILITY_IAM
+```
 Outputs include:
 
 ALB DNS – web entry point
@@ -93,7 +94,7 @@ ALB DNS – web entry point
 Bastion IP – SSH access
 
 DB Endpoint – internal MySQL address
-...
+
 ## Author
 
 Khalid Suliman
