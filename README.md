@@ -95,7 +95,7 @@ Bastion IP – SSH access
 
 DB Endpoint – internal MySQL address
 
-## Author
+Author
 
 Khalid Suliman
 MEng Electronic & Software Engineering – University of Aberdeen
