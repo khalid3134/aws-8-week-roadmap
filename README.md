@@ -97,7 +97,7 @@ DB Endpoint – internal MySQL address
 
 ## Author
 
-# Khalid Suliman
+#### Khalid Suliman
 MEng Electronic & Software Engineering – University of Aberdeen
 
 Notes
