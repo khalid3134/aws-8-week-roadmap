@@ -1,0 +1,339 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Final Production Demo Stack — VPC, Bastion, ALB, ASG in private subnets, RDS, Monitoring"
+
+# -------------------------
+# PARAMETERS
+# -------------------------
+Parameters:
+  KeyName:                          # SSH key pair for Bastion + EC2 web servers
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: day3key
+    Description: "Existing EC2 KeyPair for SSH"
+
+  InstanceType:                     # EC2 size for ASG web servers
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t2.micro, t3.micro, t3.small]
+    Description: "EC2 instance type for web servers"
+
+  DBUsername:                       # RDS master username (default = admin)
+    Type: String
+    Default: admin
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9_]*"
+    Description: "RDS master username"
+
+  DBPassword:                       # RDS master password (entered at stack creation, hidden)
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
+    Description: "RDS master password"
+
+  LatestUbuntuAmi:                  # Uses AWS SSM to fetch latest Ubuntu 22.04 AMI
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
+    Description: "Latest Ubuntu 22.04 AMI from SSM"
+
+  BastionAllowedCidr:               # Restricts SSH to Bastion (replace with your.IP/32)
+    Type: String
+    Default: "0.0.0.0/0"   # replace with your IP/32 for security
+    Description: "Your IP with /32 for SSH to Bastion"
+
+# -------------------------
+# RESOURCES
+# -------------------------
+Resources:
+
+  # --- VPC ---
+  VPC:                              # Main VPC with DNS support
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.10.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - { Key: Project, Value: AWS-Roadmap }
+        - { Key: Environment, Value: Final }
+        - { Key: Owner, Value: Khalid }
+
+  InternetGateway:                  # IGW for public internet access
+    Type: AWS::EC2::InternetGateway
+
+  AttachIGW:                        # Attach IGW to VPC
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  # --- Subnets ---
+  PublicSubnet1:                    # Public subnet in AZ1 (for Bastion + ALB)
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.10.1.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: final-public-1 }]
+
+  PublicSubnet2:                    # Public subnet in AZ2 (for ALB redundancy)
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.10.2.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags: [{ Key: Name, Value: final-public-2 }]
+
+  PrivateSubnet1:                   # Private subnet in AZ1 (for ASG + RDS)
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.10.11.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: final-private-1 }]
+
+  PrivateSubnet2:                   # Private subnet in AZ2 (for ASG + RDS)
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.10.12.0/24
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags: [{ Key: Name, Value: final-private-2 }]
+
+  # --- Routes ---
+  PublicRouteTable:                 # Route table for public subnets
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PublicRoute:                      # Default route from public subnets → IGW
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  AssocPublicSubnet1:               # Associate public route table with subnet1
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  AssocPublicSubnet2:               # Associate public route table with subnet2
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  EIP:                              # Elastic IP for NAT Gateway
+    Type: AWS::EC2::EIP
+    Properties: { Domain: vpc }
+
+  NAT:                              # NAT Gateway in Public Subnet1 for private → internet
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  PrivateRouteTable:                # Route table for private subnets
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  PrivateRoute:                     # Default route from private subnets → NAT
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NAT
+
+  AssocPrivateSubnet1:              # Associate private subnet1 → private RT
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  AssocPrivateSubnet2:              # Associate private subnet2 → private RT
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # --- Security Groups ---
+  ALBSG:                            # Allows HTTP (80) from anywhere → ALB
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "HTTP from internet"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+      SecurityGroupEgress:
+        - { IpProtocol: -1, CidrIp: 0.0.0.0/0 }
+
+  BastionSG:                        # Allows SSH only from your IP
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "SSH to bastion (restricted)"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref BastionAllowedCidr }
+      SecurityGroupEgress:
+        - { IpProtocol: -1, CidrIp: 0.0.0.0/0 }
+
+  WebSG:                            # Web servers (private ASG)
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Web nodes (private ASG)"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, SourceSecurityGroupId: !Ref ALBSG }    # ALB → Web
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, SourceSecurityGroupId: !Ref BastionSG } # Bastion → Web
+      SecurityGroupEgress:
+        - { IpProtocol: -1, CidrIp: 0.0.0.0/0 }
+
+  DBSG:                             # DB only allows MySQL (3306) from WebSG
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "DB allows MySQL from web"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 3306, ToPort: 3306, SourceSecurityGroupId: !Ref WebSG }
+      SecurityGroupEgress:
+        - { IpProtocol: -1, CidrIp: 0.0.0.0/0 }
+
+  # --- Bastion ---
+  BastionHost:                      # Jump host in public subnet1
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      ImageId: !Ref LatestUbuntuAmi
+      SubnetId: !Ref PublicSubnet1
+      SecurityGroupIds: [ !Ref BastionSG ]
+
+  # --- ALB ---
+  ALB:                              # Application Load Balancer in public subnets
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: final-alb
+      Subnets: [ !Ref PublicSubnet1, !Ref PublicSubnet2 ]
+      SecurityGroups: [ !Ref ALBSG ]
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+
+  ALBTargetGroup:                   # Target group for web instances
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      HealthCheckPath: /
+
+  ALBListenerHTTP:                  # HTTP listener forwards traffic → target group
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+
+  # --- Launch Template + ASG (Private Subnets!) ---
+  LaunchTemplate:                   # Defines EC2 config for ASG
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyName
+        ImageId: !Ref LatestUbuntuAmi
+        SecurityGroupIds: [ !Ref WebSG ]
+        UserData:                       # UserData installs nginx and writes hostname/AZ
+          Fn::Base64: |
+            #!/bin/bash
+            apt-get update -y
+            apt-get install -y nginx
+            systemctl enable nginx
+            systemctl start nginx
+            IID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+            AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+            echo "<h1>Web from ${IID} in ${AZ}</h1>" > /var/www/html/index.html
+
+  AutoScalingGroup:                 # ASG spans 2 private subnets, registers with ALB TG
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ]   # private only!
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: "2"
+      MaxSize: "4"
+      DesiredCapacity: "2"
+      TargetGroupARNs: [ !Ref ALBTargetGroup ]
+
+  # --- RDS ---
+  DBSubnetGroup:                    # Groups private subnets for RDS
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Private subnets for RDS"
+      SubnetIds: [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ]
+
+  MyDB:                             # MySQL instance in private subnets
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      AllocatedStorage: 20
+      VPCSecurityGroups: [ !Ref DBSG ]
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+
+  # --- Monitoring ---
+  AlarmTopic:                       # SNS topic for email alerts
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: "FinalAlarmTopic"
+      Subscription:
+        - Protocol: email
+          Endpoint: khalidsuliman3134@gmail.com   # change to yours
+
+  HighCPUAlarm:                     # CloudWatch alarm: ASG avg CPU > 50% for 5 mins
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Alarm if ASG average CPU > 50% for 5 minutes"
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 5
+      Threshold: 50
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions: [ !Ref AlarmTopic ]
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+
+# -------------------------
+# OUTPUTS
+# -------------------------
+Outputs:
+  ALBEndpoint:                      # Output ALB DNS (HTTP URL)
+    Description: "HTTP URL of the ALB"
+    Value: !Sub "http://${ALB.DNSName}"
+
+  BastionPublicIP:                  # Output Bastion public IP for SSH
+    Description: "Public IP for SSH into the Bastion"
+    Value: !GetAtt BastionHost.PublicIp
+
+  DBEndpoint:                       # Output RDS private endpoint
+    Description: "RDS Endpoint (private)"
+    Value: !GetAtt MyDB.Endpoint.Address
