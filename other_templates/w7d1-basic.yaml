@@ -1,0 +1,10 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Week 7 Day 1 - Hello CloudFormation"
+
+Resources:
+  W7D1Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "w7d1-bucket-${AWS::AccountId}-${AWS::Region}"
+      VersioningConfiguration:
+        Status: Enabled

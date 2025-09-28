@@ -1,0 +1,261 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Week 7 Day 3 - VPC with public + private subnets, NAT Gateway, bastion/web EC2 (public) + private EC2"
+
+# ----------------------
+# Parameters: inputs to the template
+# ----------------------
+Parameters:
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: day3key   # <-- replace if your key has a different name
+    Description: Name of an existing EC2 KeyPair to enable SSH access
+
+  LatestUbuntuAmi:
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: "/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id"
+    Description: "Always fetches the latest Ubuntu 22.04 AMI ID from SSM"
+
+# ----------------------
+# Resources: actual infrastructure to create
+# ----------------------
+Resources:
+
+  # === VPC ===
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.3.0.0/16         # large enough for multiple subnets
+      EnableDnsSupport: true         # allows DNS resolution inside VPC
+      EnableDnsHostnames: true       # assigns DNS hostnames to instances
+      Tags: [{ Key: Name, Value: w7d3-vpc }]
+
+  # === Internet Gateway for public access ===
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: w7d3-igw }]
+
+  AttachIgw:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  # === Public Subnet (bastion/web server goes here) ===
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.3.1.0/24
+      MapPublicIpOnLaunch: true      # ensures EC2s here get a public IP
+      AvailabilityZone: !Select [0, !GetAZs ""]   # place in 1st AZ
+      Tags: [{ Key: Name, Value: w7d3-public }]
+
+  # === Private Subnet (internal-only instance) ===
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.3.2.0/24
+      MapPublicIpOnLaunch: false     # EC2s here will NOT get public IPs
+      AvailabilityZone: !Select [1, !GetAZs ""]   # place in 2nd AZ
+      Tags: [{ Key: Name, Value: w7d3-private }]
+
+  # === Public Route Table (routes internet traffic to IGW) ===
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: w7d3-public-rt }]
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0   # default route for all traffic
+      GatewayId: !Ref InternetGateway   # send via IGW
+
+  AssocPublicSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # === NAT Gateway for private subnet outbound internet ===
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc    # EIP tied to the VPC
+
+  NAT:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EIP.AllocationId
+      SubnetId: !Ref PublicSubnet       # NAT must sit in the public subnet
+      Tags: [{ Key: Name, Value: w7d3-nat }]
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: w7d3-private-rt }]
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0   # default route for all traffic
+      NatGatewayId: !Ref NAT            # private subnet traffic exits via NAT
+
+  AssocPrivateSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  # === Security Groups ===
+  PublicSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH + HTTP from anywhere
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0     # SSH open (for bastion access)
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0     # HTTP open (for nginx test page)
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0     # allow all outbound
+      Tags: [{ Key: Name, Value: w7d3-public-sg }]
+
+  PrivateSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH only from public SG
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref PublicSG   # restrict SSH to bastion only
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags: [{ Key: Name, Value: w7d3-private-sg }]
+
+  # === Public EC2 Instance (bastion + web server) ===
+  PublicInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      ImageId: !Ref LatestUbuntuAmi    # always latest Ubuntu 22.04
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          SubnetId: !Ref PublicSubnet
+          GroupSet: [ !Ref PublicSG ]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install -y nginx
+          echo "<h1>Public Bastion/Web Instance</h1>" > /var/www/html/index.html
+          systemctl enable nginx
+          systemctl start nginx
+
+  # === Private EC2 Instance (internal-only) ===
+  PrivateInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      ImageId: !Ref LatestUbuntuAmi
+      SubnetId: !Ref PrivateSubnet
+      SecurityGroupIds: [ !Ref PrivateSG ]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Private instance is running" > /home/ubuntu/private.log
+
+# ----------------------
+# Outputs: handy values after stack creation
+# ----------------------
+Outputs:
+  PublicIP:
+    Description: "Public IP of the bastion/web server"
+    Value: !GetAtt PublicInstance.PublicIp
+
+  PrivateInstanceId:
+    Description: "ID of the private EC2 instance"
+    Value: !Ref PrivateInstance
+
+  PrivateSubnetId:
+    Description: "Subnet ID of the private subnet"
+    Value: !Ref PrivateSubnet
+
+  # === ALB Security Group ===
+  ALBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP from internet to ALB
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags: [{ Key: Name, Value: w7d4-alb-sg }]
+
+  # === ALB itself ===
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: w7d4-alb
+      Subnets: 
+        - !Ref PublicSubnet
+      SecurityGroups: [ !Ref ALBSG ]
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      Tags: [{ Key: Name, Value: w7d4-alb }]
+
+  # === Target Group (points to EC2 instances) ===
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPort: "80"
+      HealthCheckPath: /
+      Matcher: { HttpCode: 200 }
+
+  # Register the PublicInstance in the target group
+  ALBTargetAttachment:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroupAttachment
+    Properties:
+      TargetGroupArn: !Ref ALBTargetGroup
+      TargetId: !Ref PublicInstance
+      Port: 80
+
+  # === Listener (routes requests to TG) ===
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup

@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Week 7 Day 2 - VPC with Public and Private Subnets (CIDR adjusted)"
+
+# -------------------------
+# RESOURCES
+# -------------------------
+Resources:
+
+  # --- VPC ---
+  W7D2VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: w7d2-vpc
+
+  # --- Internet Gateway ---
+  W7D2IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: w7d2-igw
+
+  W7D2AttachIGW:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref W7D2VPC
+      InternetGatewayId: !Ref W7D2IGW
+
+  # --- Public Subnet ---
+  W7D2PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref W7D2VPC
+      CidrBlock: 10.1.1.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs "" ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: w7d2-public-subnet
+
+  # --- Public Route Table ---
+  W7D2PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref W7D2VPC
+
+  # Public route → IGW
+  W7D2PublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref W7D2PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref W7D2IGW
+
+  W7D2PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref W7D2PublicSubnet
+      RouteTableId: !Ref W7D2PublicRouteTable
+
+  # --- Private Subnet ---
+  W7D2PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref W7D2VPC
+      CidrBlock: 10.1.2.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs "" ]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: w7d2-private-subnet
+
+  # --- NAT Gateway (EIP in public subnet) ---
+  W7D2EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  W7D2NAT:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt W7D2EIP.AllocationId
+      SubnetId: !Ref W7D2PublicSubnet
+      Tags:
+        - Key: Name
+          Value: w7d2-nat
+
+  # --- Private Route Table ---
+  W7D2PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref W7D2VPC
+
+  # Private route → NAT
+  W7D2PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref W7D2PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref W7D2NAT
+
+  W7D2PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref W7D2PrivateSubnet
+      RouteTableId: !Ref W7D2PrivateRouteTable
